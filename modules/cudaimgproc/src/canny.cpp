@@ -45,9 +45,13 @@
 using namespace cv;
 using namespace cv::cuda;
 
-#if !defined (HAVE_CUDA) || defined (CUDA_DISABLER)
+#if !defined(HAVE_CUDA) || defined(CUDA_DISABLER)
 
-Ptr<CannyEdgeDetector> cv::cuda::createCannyEdgeDetector(double, double, int, bool) { throw_no_cuda(); return Ptr<CannyEdgeDetector>(); }
+Ptr<CannyEdgeDetector> cv::cuda::createCannyEdgeDetector(double, double, int, bool)
+{
+    throw_no_cuda();
+    return Ptr<CannyEdgeDetector>();
+}
 
 #else /* !defined (HAVE_CUDA) */
 
@@ -58,9 +62,9 @@ namespace canny
 
     void calcMap(PtrStepSzi dx, PtrStepSzi dy, PtrStepSzf mag, PtrStepSzi map, float low_thresh, float high_thresh, cudaStream_t stream);
 
-    void edgesHysteresisLocal(PtrStepSzi map, short2* st1, int* d_counter, cudaStream_t stream);
+    void edgesHysteresisLocal(PtrStepSzi map, short2 *st1, int *d_counter, cudaStream_t stream);
 
-    void edgesHysteresisGlobal(PtrStepSzi map, short2* st1, short2* st2, int* d_counter, cudaStream_t stream);
+    void edgesHysteresisGlobal(PtrStepSzi map, short2 *st1, short2 *st2, int *d_counter, cudaStream_t stream);
 
     void getEdges(PtrStepSzi map, PtrStepSzb dst, cudaStream_t stream);
 }
@@ -70,15 +74,20 @@ namespace
     class CannyImpl : public CannyEdgeDetector
     {
     public:
-        CannyImpl(double low_thresh, double high_thresh, int apperture_size, bool L2gradient) :
-            low_thresh_(low_thresh), high_thresh_(high_thresh), apperture_size_(apperture_size), L2gradient_(L2gradient)
+        CannyImpl(double low_thresh, double high_thresh, int apperture_size, bool L2gradient) : low_thresh_(low_thresh), high_thresh_(high_thresh), apperture_size_(apperture_size), L2gradient_(L2gradient)
         {
             old_apperture_size_ = -1;
             d_counter = nullptr;
+            cudaSafeCall(cudaMalloc(&d_counter, sizeof(int)));
         }
 
-        void detect(InputArray image, OutputArray edges, Stream& stream);
-        void detect(InputArray dx, InputArray dy, OutputArray edges, Stream& stream);
+        ~CannyImpl()
+        {
+            cudaSafeCall(cudaFree(d_counter));
+        }
+
+        void detect(InputArray image, OutputArray edges, Stream &stream);
+        void detect(InputArray dx, InputArray dy, OutputArray edges, Stream &stream);
 
         void setLowThreshold(double low_thresh) { low_thresh_ = low_thresh; }
         double getLowThreshold() const { return low_thresh_; }
@@ -92,19 +101,20 @@ namespace
         void setL2Gradient(bool L2gradient) { L2gradient_ = L2gradient; }
         bool getL2Gradient() const { return L2gradient_; }
 
-        void write(FileStorage& fs) const
+        void write(FileStorage &fs) const
         {
             writeFormat(fs);
-            fs << "name" << "Canny_CUDA"
-            << "low_thresh" << low_thresh_
-            << "high_thresh" << high_thresh_
-            << "apperture_size" << apperture_size_
-            << "L2gradient" << L2gradient_;
+            fs << "name"
+               << "Canny_CUDA"
+               << "low_thresh" << low_thresh_
+               << "high_thresh" << high_thresh_
+               << "apperture_size" << apperture_size_
+               << "L2gradient" << L2gradient_;
         }
 
-        void read(const FileNode& fn)
+        void read(const FileNode &fn)
         {
-            CV_Assert( String(fn["name"]) == "Canny_CUDA" );
+            CV_Assert(String(fn["name"]) == "Canny_CUDA");
             low_thresh_ = (double)fn["low_thresh"];
             high_thresh_ = (double)fn["high_thresh"];
             apperture_size_ = (int)fn["apperture_size"];
@@ -113,7 +123,7 @@ namespace
 
     private:
         void createBuf(Size image_size);
-        void CannyCaller(GpuMat& edges, Stream& stream);
+        void CannyCaller(GpuMat &edges, Stream &stream);
 
         double low_thresh_;
         double high_thresh_;
@@ -132,12 +142,12 @@ namespace
         int *d_counter;
     };
 
-    void CannyImpl::detect(InputArray _image, OutputArray _edges, Stream& stream)
+    void CannyImpl::detect(InputArray _image, OutputArray _edges, Stream &stream)
     {
         GpuMat image = _image.getGpuMat();
 
-        CV_Assert( image.type() == CV_8UC1 );
-        CV_Assert( deviceSupports(SHARED_ATOMICS) );
+        CV_Assert(image.type() == CV_8UC1);
+        CV_Assert(deviceSupports(SHARED_ATOMICS));
 
         if (low_thresh_ > high_thresh_)
             std::swap(low_thresh_, high_thresh_);
@@ -171,14 +181,14 @@ namespace
         CannyCaller(edges, stream);
     }
 
-    void CannyImpl::detect(InputArray _dx, InputArray _dy, OutputArray _edges, Stream& stream)
+    void CannyImpl::detect(InputArray _dx, InputArray _dy, OutputArray _edges, Stream &stream)
     {
         GpuMat dx = _dx.getGpuMat();
         GpuMat dy = _dy.getGpuMat();
 
-        CV_Assert( dx.type() == CV_32SC1 );
-        CV_Assert( dy.type() == dx.type() && dy.size() == dx.size() );
-        CV_Assert( deviceSupports(SHARED_ATOMICS) );
+        CV_Assert(dx.type() == CV_32SC1);
+        CV_Assert(dy.type() == dx.type() && dy.size() == dx.size());
+        CV_Assert(deviceSupports(SHARED_ATOMICS));
 
         dx.copyTo(dx_, stream);
         dy.copyTo(dy_, stream);
@@ -219,19 +229,15 @@ namespace
         ensureSizeIsEnough(1, image_size.area(), CV_16SC2, st2_);
     }
 
-    void CannyImpl::CannyCaller(GpuMat& edges, Stream& stream)
+    void CannyImpl::CannyCaller(GpuMat &edges, Stream &stream)
     {
         map_.setTo(Scalar::all(0), stream);
 
         canny::calcMap(dx_, dy_, mag_, map_, static_cast<float>(low_thresh_), static_cast<float>(high_thresh_), StreamAccessor::getStream(stream));
 
-        cudaSafeCall( cudaMalloc(&d_counter, sizeof(int)) );
-
         canny::edgesHysteresisLocal(map_, st1_.ptr<short2>(), d_counter, StreamAccessor::getStream(stream));
 
         canny::edgesHysteresisGlobal(map_, st1_.ptr<short2>(), st2_.ptr<short2>(), d_counter, StreamAccessor::getStream(stream));
-
-        cudaSafeCall( cudaFree(d_counter) );
 
         canny::getEdges(map_, edges, StreamAccessor::getStream(stream));
     }
