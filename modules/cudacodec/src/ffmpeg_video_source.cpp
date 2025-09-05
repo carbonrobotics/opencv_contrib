@@ -66,55 +66,9 @@ static std::string fourccToString(int fourcc)
         (i32_c.c[3] >= ' ' && i32_c.c[3] < 128) ? i32_c.c[3] : '?');
 }
 
-// handle old FFmpeg backend - remove when windows shared library is updated
-#ifdef _WIN32
-static
-Codec FourccToCodecWin32Old(int codec)
-{
-    switch (codec)
-    {
-    case CV_FOURCC_MACRO('m', 'p', 'e', 'g'): // fallthru
-    case CV_FOURCC_MACRO('m', 'p', 'g', '1'): // fallthru
-    case CV_FOURCC_MACRO('M', 'P', 'G', '1'): return MPEG1;
-    case CV_FOURCC_MACRO('m', 'p', 'g', '2'): // fallthru
-    case CV_FOURCC_MACRO('M', 'P', 'G', '2'): return MPEG2;
-    case CV_FOURCC_MACRO('X', 'V', 'I', 'D'): // fallthru
-    case CV_FOURCC_MACRO('m', 'p', '4', 'v'): // fallthru
-    case CV_FOURCC_MACRO('D', 'I', 'V', 'X'): return MPEG4;
-    case CV_FOURCC_MACRO('W', 'V', 'C', '1'): return VC1;
-    case CV_FOURCC_MACRO('H', '2', '6', '4'): // fallthru
-    case CV_FOURCC_MACRO('h', '2', '6', '4'): // fallthru
-    case CV_FOURCC_MACRO('a', 'v', 'c', '1'): return H264;
-    case CV_FOURCC_MACRO('H', '2', '6', '5'): // fallthru
-    case CV_FOURCC_MACRO('h', '2', '6', '5'): // fallthru
-    case CV_FOURCC_MACRO('h', 'e', 'v', 'c'): return HEVC;
-    case CV_FOURCC_MACRO('M', 'J', 'P', 'G'): return JPEG;
-    case CV_FOURCC_MACRO('v', 'p', '8', '0'): // fallthru
-    case CV_FOURCC_MACRO('V', 'P', '8', '0'): // fallthru
-    case CV_FOURCC_MACRO('v', 'p', '0', '8'): // fallthru
-    case CV_FOURCC_MACRO('V', 'P', '0', '8'): return VP8;
-    case CV_FOURCC_MACRO('v', 'p', '9', '0'): // fallthru
-    case CV_FOURCC_MACRO('V', 'P', '9', '0'): // fallthru
-    case CV_FOURCC_MACRO('V', 'P', '0', '9'): // fallthru
-    case CV_FOURCC_MACRO('v', 'p', '0', '9'): return VP9;
-    case CV_FOURCC_MACRO('a', 'v', '1', '0'): // fallthru
-    case CV_FOURCC_MACRO('A', 'V', '1', '0'): // fallthru
-    case CV_FOURCC_MACRO('a', 'v', '0', '1'): // fallthru
-    case CV_FOURCC_MACRO('A', 'V', '0', '1'): return AV1;
-    default:
-        return NumCodecs;
-    }
-}
-#endif
-
 static
 Codec FourccToCodec(int codec)
 {
-#ifdef _WIN32 // handle old FFmpeg backend - remove when windows shared library is updated
-    Codec win32OldCodec = FourccToCodecWin32Old(codec);
-    if(win32OldCodec != NumCodecs)
-        return win32OldCodec;
-#endif
     switch (codec)
     {
     case CV_FOURCC_MACRO('m', 'p', 'g', '1'): return MPEG1;
@@ -133,23 +87,6 @@ Codec FourccToCodec(int codec)
     std::string msg = cv::format("Unknown codec FOURCC: 0x%08X (%s)", codec, fourccToString(codec).c_str());
     CV_LOG_WARNING(NULL, msg);
     CV_Error(Error::StsUnsupportedFormat, msg);
-}
-
-static
-void FourccToChromaFormat(const int pixelFormat, ChromaFormat &chromaFormat, int & nBitDepthMinus8)
-{
-    switch (pixelFormat)
-    {
-    case CV_FOURCC_MACRO('I', '4', '2', '0'):
-        chromaFormat = YUV420;
-        nBitDepthMinus8 = 0;
-        break;
-    default:
-        CV_LOG_WARNING(NULL, cv::format("ChromaFormat not recognized: 0x%08X (%s). Assuming I420", pixelFormat, fourccToString(pixelFormat).c_str()));
-        chromaFormat = YUV420;
-        nBitDepthMinus8 = 0;
-        break;
-    }
 }
 
 static
@@ -191,14 +128,12 @@ cv::cudacodec::detail::FFmpegVideoSource::FFmpegVideoSource(const String& fname,
         extraData = tmpExtraData.clone();
 
     int codec = (int)cap.get(CAP_PROP_FOURCC);
-    int pixelFormat = (int)cap.get(CAP_PROP_CODEC_PIXEL_FORMAT);
     format_.codec = FourccToCodec(codec);
     format_.height = cap.get(CAP_PROP_FRAME_HEIGHT);
     format_.width = cap.get(CAP_PROP_FRAME_WIDTH);
     format_.displayArea = Rect(0, 0, format_.width, format_.height);
     format_.valid = false;
     format_.fps = cap.get(CAP_PROP_FPS);
-    FourccToChromaFormat(pixelFormat, format_.chromaFormat, format_.nBitDepthMinus8);
 }
 
 cv::cudacodec::detail::FFmpegVideoSource::~FFmpegVideoSource()

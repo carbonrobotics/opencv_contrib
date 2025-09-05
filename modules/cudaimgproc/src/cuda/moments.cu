@@ -16,14 +16,22 @@ constexpr int blockSizeY = 16;
 template <typename T>
 __device__ T butterflyWarpReduction(T value) {
     for (int i = 16; i >= 1; i /= 2)
+#if (CUDART_VERSION >= 9000)
         value += __shfl_xor_sync(0xffffffff, value, i, 32);
+#else
+        value += __shfl_xor(value, i, 32);
+#endif
     return value;
 }
 
 template <typename T>
 __device__ T butterflyHalfWarpReduction(T value) {
     for (int i = 8; i >= 1; i /= 2)
-        value += __shfl_xor_sync(0xffff, value, i, 32);
+#if (CUDART_VERSION >= 9000)
+        value += __shfl_xor_sync(0xffff, value, i, 16);
+#else
+        value += __shfl_xor(value, i, 16);
+#endif
     return value;
 }
 
@@ -131,7 +139,7 @@ template <typename TSrc, typename TMoments, int nMoments> struct momentsDispatch
     static void call(const PtrStepSz<TSrc> src, PtrStepSz<TMoments> moments, const bool binary, const int offsetX, const cudaStream_t stream) {
         dim3 blockSize(blockSizeX, blockSizeY);
         dim3 gridSize = dim3(divUp(src.rows, blockSizeY));
-        spatialMoments<TSrc, TMoments, false, false, nMoments> << <gridSize, blockSize, 0, stream >> > (src, binary, moments.ptr());
+        spatialMoments<TSrc, TMoments, false, false, nMoments> <<<gridSize, blockSize, 0, stream >>> (src, binary, moments.ptr());
         if (stream == 0)
             cudaSafeCall(cudaStreamSynchronize(stream));
     };
@@ -142,9 +150,9 @@ template <typename TSrc, int nMoments> struct momentsDispatcherChar {
         dim3 blockSize(blockSizeX, blockSizeY);
         dim3 gridSize = dim3(divUp(src.rows, blockSizeY));
         if (offsetX)
-            spatialMoments<TSrc, float, true, false, nMoments> << <gridSize, blockSize, 0, stream >> > (src, binary, moments.ptr(), offsetX);
+            spatialMoments<TSrc, float, true, false, nMoments> <<<gridSize, blockSize, 0, stream >>> (src, binary, moments.ptr(), offsetX);
         else
-            spatialMoments<TSrc, float, true, true, nMoments> << <gridSize, blockSize, 0, stream >> > (src, binary, moments.ptr());
+            spatialMoments<TSrc, float, true, true, nMoments> <<<gridSize, blockSize, 0, stream >>> (src, binary, moments.ptr());
 
         if (stream == 0)
             cudaSafeCall(cudaStreamSynchronize(stream));
